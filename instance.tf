@@ -4,6 +4,7 @@ resource "aws_instance" "kafka-security" {
   key_name = "${aws_key_pair.mykey.key_name}"
   associate_public_ip_address = true
   security_groups = ["${aws_security_group.allow-ssh.name}"]
+  user_data = "${data.template_cloudinit_config.cloud-init.rendered}"
 
   tags {
     Name = "kafka-security"
