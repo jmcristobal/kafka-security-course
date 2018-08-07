@@ -13,3 +13,6 @@ variable "AMI" {
 variable "INSTANCE" {
   default = "t2.large"
 }
+variable "IP" {
+  default = "0.0.0.0/0"
+}

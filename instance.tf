@@ -3,7 +3,7 @@ resource "aws_instance" "kafka-security" {
   instance_type = "${var.INSTANCE}"
   key_name = "${aws_key_pair.mykey.key_name}"
   associate_public_ip_address = true
-  security_groups = ["${aws_security_group.allow-ssh.name}"]
+  security_groups = ["${aws_security_group.ssh-zookeeper-kafka.name}"]
   user_data = "${data.template_cloudinit_config.cloud-init.rendered}"
 
   tags {
@@ -17,8 +17,4 @@ output "ip" {
 
 output "dns" {
   value = "${aws_instance.kafka-security.public_dns}"
-}
-
-output "security_groups" {
-  value = "${aws_instance.kafka-security.security_groups}"
 }
