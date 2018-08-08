@@ -11,6 +11,34 @@ rm -rf kafka_2.11-2.0.0.tgz
 
 ln -s kafka_2.11-2.0.0 kafka
 
+DNS=`curl -s http://169.254.169.254/latest/meta-data/public-hostname`
+
+export SRVPASS=serverpass
+
+mkdir ssl
+cd ssl
+
+# create CA => result: file ca-cert and the priv.key ca-key
+openssl req -new -newkey rsa:4096 -days 365 -x509 -subj "/CN=Kafka-Security-CA" -keyout ca-key -out ca-cert -nodes
+
+# create a server certificate !! put your public EC2-DNS here, after "CN="
+keytool -genkey -keystore kafka.server.keystore.jks -validity 365 -storepass $SRVPASS -keypass $SRVPASS -dname "CN=$DNS" -storetype pkcs12
+
+## create a certification request file, to be signed by the CA
+keytool -keystore kafka.server.keystore.jks -certreq -file cert-file -storepass $SRVPASS -keypass $SRVPASS
+
+## sign the server certificate => output: file "cert-signed"
+openssl x509 -req -CA ca-cert -CAkey ca-key -in cert-file -out cert-signed -days 365 -CAcreateserial -passin pass:$SRVPASS
+
+# Trust the CA by creating a truststore and importing the ca-cert
+keytool -keystore kafka.server.truststore.jks -alias CARoot -import -file ca-cert -storepass $SRVPASS -keypass $SRVPASS -noprompt
+
+# Import CA and the signed server certificate into the keystore
+keytool -keystore kafka.server.keystore.jks -alias CARoot -import -file ca-cert -storepass $SRVPASS -keypass $SRVPASS -noprompt
+keytool -keystore kafka.server.keystore.jks -import -file cert-signed -storepass $SRVPASS -keypass $SRVPASS -noprompt
+
+cd ..
+
 tee <<EOF /etc/systemd/system/zookeeper.service >/dev/null
 [Unit]
 Description=Apache Zookeeper server
@@ -56,8 +84,15 @@ broker.id=0
 #     listeners = listener_name://host_name:port
 #   EXAMPLE:
 #     listeners = PLAINTEXT://your.host.name:9092
-advertised.listeners=PLAINTEXT://##your-public-DNS##:9092
-zookeeper.connect=##your-public-DNS##:2181
+listeners=PLAINTEXT://0.0.0.0:9092,SSL://0.0.0.0:9093
+advertised.listeners=PLAINTEXT://$DNS:9092,SSL://$DNS:9093
+zookeeper.connect=$DNS:2181
+
+ssl.keystore.location=/home/ubuntu/ssl/kafka.server.keystore.jks
+ssl.keystore.password=$SRVPASS
+ssl.key.password=$SRVPASS
+ssl.truststore.location=/home/ubuntu/ssl/kafka.server.truststore.jks
+ssl.truststore.password=$SRVPASS
 
 
 # Maps listener names to security protocols, the default is for them to be the same. See the config documentation for more details
@@ -78,10 +113,12 @@ socket.receive.buffer.bytes=102400
 # The maximum size of a request that the socket server will accept (protection against OOM)
 socket.request.max.bytes=104857600
 
+
 auto.create.topics.enable=false
 
 ############################# Log Basics #############################
 
+# A comma seperated list of directories under which to store log files
 log.dirs=/home/ubuntu/kafka-logs
 
 # The default number of log partitions per topic. More partitions allow greater
@@ -100,6 +137,30 @@ offsets.topic.replication.factor=1
 transaction.state.log.replication.factor=1
 transaction.state.log.min.isr=1
 
+############################# Log Flush Policy #############################
+
+# Messages are immediately written to the filesystem but by default we only fsync() to sync
+# the OS cache lazily. The following configurations control the flush of data to disk.
+# There are a few important trade-offs here:
+#    1. Durability: Unflushed data may be lost if you are not using replication.
+#    2. Latency: Very large flush intervals may lead to latency spikes when the flush does occur as there will be a lot of data to flush.
+#    3. Throughput: The flush is generally the most expensive operation, and a small flush interval may lead to exceessive seeks.
+# The settings below allow one to configure the flush policy to flush data after a period of time or
+# every N messages (or both). This can be done globally and overridden on a per-topic basis.
+
+# The number of messages to accept before forcing a flush of data to disk
+#log.flush.interval.messages=10000
+
+# The maximum amount of time a message can sit in a log before we force a flush
+#log.flush.interval.ms=1000
+
+############################# Log Retention Policy #############################
+
+# The following configurations control the disposal of log segments. The policy can
+# be set to delete segments after a period of time, or after a given size has accumulated.
+# A segment will be deleted whenever *either* of these criteria are met. Deletion always happens
+# from the end of the log.
+
 # The minimum age of a log file to be eligible for deletion due to age
 log.retention.hours=168
 
@@ -114,10 +175,25 @@ log.segment.bytes=1073741824
 # to the retention policies
 log.retention.check.interval.ms=300000
 
+############################# Zookeeper #############################
+
+# Zookeeper connection string (see zookeeper docs for details).
+# This is a comma separated host:port pairs, each corresponding to a zk
+# server. e.g. "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002".
+# You can also append an optional chroot string to the urls to specify the
+# root directory for all kafka znodes.
 
 # Timeout in ms for connecting to zookeeper
 zookeeper.connection.timeout.ms=6000
 
+
+############################# Group Coordinator Settings #############################
+
+# The following configuration specifies the time, in milliseconds, that the GroupCoordinator will delay the initial consumer rebalance.
+# The rebalance will be further delayed by the value of group.initial.rebalance.delay.ms as new members join the group, up to a maximum of max.poll.interval.ms.
+# The default value for this is 3 seconds.
+# We override this to 0 here as it makes for a better out-of-the-box experience for development and testing.
+# However, in production environments the default value of 3 seconds is more suitable as this will help to avoid unnecessary, and potentially expensive, rebalances during application startup.
 EOF
 
 systemctl enable zookeeper
