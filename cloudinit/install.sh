@@ -4,7 +4,7 @@ set -ex
 
 cd /home/ubuntu
 
-wget http://artfiles.org/apache.org/kafka/2.0.0/kafka_2.11-2.0.0.tgz
+wget http://apache.rediris.es/kafka/2.0.0/kafka_2.11-2.0.0.tgz
 
 tar -xzf kafka_2.11-2.0.0.tgz
 rm -rf kafka_2.11-2.0.0.tgz
